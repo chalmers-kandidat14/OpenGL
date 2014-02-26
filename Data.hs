@@ -4,7 +4,6 @@ module Data where
 import Prelude hiding ( init )
 import Graphics.UI.GLUT
 
-
 type KeyboardMouse = ( Key        -- Indicates which key or button is pressed or released
                      , KeyState   -- Indicates whether the key is pressed or released
                      , Modifiers  -- Indicates whether the ctrl or alt key is pressed

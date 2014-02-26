@@ -2,9 +2,11 @@
 
 import qualified Data as D
 import Setup
+import Util
 
 import Graphics.UI.GLUT
 
+{-
 type State = ()
 
 disp :: State -> IO State
@@ -14,9 +16,19 @@ disp _ = do
   renderObject Solid (Sphere' 1 40 20)
   flush
   swapBuffers
+-}
+
+type State = [Bead]
+
+disp beads = do
+  clear [ ColorBuffer, DepthBuffer ]
+  mapM_ displayBead beads
+  flush
+  swapBuffers
+  return beads
 
 rshp :: State -> Size -> IO State
-rshp _ size@(Size w h) = do
+rshp x size@(Size w h) = do
   viewport $= (Position 0 0, size)
   matrixMode $= Projection
   loadIdentity
@@ -27,12 +39,20 @@ rshp _ size@(Size w h) = do
     else ortho (-1.5 * wf / hf) (1.5 * wf / hf) (-1.5) 1.5 (-10) 10
   matrixMode $= Modelview 0
   loadIdentity
+  return x
+
+myBeads = [Bead (0, 0) H, Bead (1,0) P, Bead (1, 1) P]
 
 main :: IO ()
 main = do
+{-
   let cbks  = (D.emptyCallbacks ())
                { D.display = disp
                , D.reshape = rshp }
+-}
+  let cbks  = (D.emptyCallbacks myBeads)
+                { D.display = disp
+                , D.reshape = rshp }
 
       wopts = D.WindowOptions
                 { D.windowSize = (500, 500)
@@ -44,3 +64,29 @@ main = do
                 , D.windowOptions = wopts }
 
   setup opts
+
+
+
+data Residue = H | P
+  deriving (Show, Eq)
+
+data Bead = Bead (Int, Int) Residue
+  deriving (Show, Eq)
+
+displayBead :: Bead -> IO ()
+displayBead (Bead (x, y) r) = do
+  preservingMatrix $ do
+    color clr
+    translate pos
+    renderObject Solid (Sphere' 0.5 40 20)
+    
+  where
+    pos = Vector3 (toGLfloat . fromIntegral $ x) (toGLfloat . fromIntegral $ y) 0 
+    clr = case r of
+            H -> Color4 1 0 0 1 :: Color4 GLfloat
+            P -> Color4 0.5 0.5 0.5 1
+
+
+
+
+
