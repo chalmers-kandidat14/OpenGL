@@ -5,7 +5,7 @@ module Setup where
 import Prelude hiding ( init )
 import System.Exit ( exitSuccess )
 import Graphics.UI.GLUT
-import Control.Concurrent ( MVar, readMVar, swapMVar, newMVar, takeMVar, putMVar, forkIO, threadDelay )
+import Control.Concurrent ( MVar, readMVar, swapMVar, newMVar, takeMVar, putMVar, forkIO, forkOS, threadDelay )
 import Control.Monad ( unless, forever )
 
 import qualified Data as D
@@ -18,7 +18,7 @@ setup opts = do
   let wopt = D.windowOptions opts
 
   (wName, _) <- getArgsAndInitialize
-  makeWindow wName wopt
+  _ <- makeWindow wName wopt
 
   state0 <- D.init cbks
   stateMVar <- newMVar state0
@@ -45,6 +45,10 @@ setup opts = do
         let dsp = D.display cbks
         stateMVar `withMVar` dsp
         displayReadyMVar`swapMVar` True
+        
+        flush
+        swapBuffers
+        postRedisplay Nothing
         return ()      
 
       reshapeCallback' size = do
@@ -69,7 +73,7 @@ setup opts = do
     withMVar m f = takeMVar m >>= f >>= putMVar m
 
 
-makeWindow :: String -> D.WindowOptions -> IO ()
+makeWindow :: String -> D.WindowOptions -> IO (Window)
 makeWindow wName wopt = do
   let size = toSize $ D.windowSize wopt
   let pos  = toPosition $ D.windowPos wopt
@@ -81,7 +85,7 @@ makeWindow wName wopt = do
   initialWindowSize     $= size
   initialWindowPosition $= pos
 
-  _ <- createWindow name
+  wndw <- createWindow name
 
   clearColor $= Color4 0 0 0 0
   shadeModel $= Smooth
@@ -95,6 +99,7 @@ makeWindow wName wopt = do
   materialSpecular Front  $= Color4 1 1 1 1
   materialShininess Front $= 100
   colorMaterial           $= Just (Front, Diffuse)
+  return wndw
 
 idleThread :: MVar s -> MVar Bool -> (s -> IO s) -> IO ()
 idleThread stateMVar displayReadyMVar idle = do
@@ -110,7 +115,6 @@ idleThread stateMVar displayReadyMVar idle = do
     _ <- nextState `seq` swapMVar stateMVar nextState
 
     postRedisplay Nothing
-
   
 
 

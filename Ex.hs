@@ -4,27 +4,14 @@ import qualified Data as D
 import Setup
 import Util
 
+import Control.Concurrent (threadDelay, yield)
 import Graphics.UI.GLUT
-
-{-
-type State = ()
-
-disp :: State -> IO State
-disp _ = do
-  clear [ ColorBuffer, DepthBuffer ]
-  color (Color4 0.5 0.5 0.5 1 :: Color4 GLdouble)
-  renderObject Solid (Sphere' 1 40 20)
-  flush
-  swapBuffers
--}
 
 type State = [Bead]
 
 disp beads = do
   clear [ ColorBuffer, DepthBuffer ]
   mapM_ displayBead beads
-  flush
-  swapBuffers
   return beads
 
 rshp :: State -> Size -> IO State
@@ -43,16 +30,18 @@ rshp x size@(Size w h) = do
 
 myBeads = [Bead (0, 0) H, Bead (1,0) P, Bead (1, 1) P]
 
+test [] = yield >> return []
+test s = do
+  threadDelay $ 3 * 1000000
+  return (tail s)
+
+
 main :: IO ()
 main = do
-{-
-  let cbks  = (D.emptyCallbacks ())
-               { D.display = disp
-               , D.reshape = rshp }
--}
   let cbks  = (D.emptyCallbacks myBeads)
                 { D.display = disp
-                , D.reshape = rshp }
+                , D.reshape = rshp
+                , D.idle    = Just test}
 
       wopts = D.WindowOptions
                 { D.windowSize = (500, 500)
@@ -84,7 +73,7 @@ displayBead (Bead (x, y) r) = do
     pos = Vector3 (toGLfloat . fromIntegral $ x) (toGLfloat . fromIntegral $ y) 0 
     clr = case r of
             H -> Color4 1 0 0 1 :: Color4 GLfloat
-            P -> Color4 0.5 0.5 0.5 1
+            P -> Color4 1 1 1 1 :: Color4 GLfloat
 
 
 
