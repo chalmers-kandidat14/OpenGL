@@ -1,81 +1,43 @@
-
+{-# LANGUAGE TypeFamilies, TypeOperators, FlexibleContexts, NoMonomorphismRestriction #-}
 
 import qualified Data as D
 import Setup
 import Util
+import Beads
+import Camera
 
 import Control.Concurrent (threadDelay, yield)
 import Graphics.UI.GLUT
+import Data.Has
 
-type State = [Bead]
+type State = FieldOf Beads :&: FieldOf CameraState
 
-disp beads = do
-  clear [ ColorBuffer, DepthBuffer ]
-  mapM_ displayBead beads
-  return beads
+beads0 :: [Bead]
+beads0 = [ (Vector3   0    0    0 , Color4 1 1 1 1)
+         , (Vector3   5    0    0 , Color4 0 1 0 1)
+         , (Vector3 (-5)   0    0 , Color4 0 1 0 1)
+         , (Vector3   0    5    0 , Color4 1 0 0 1)
+         , (Vector3   0  (-5)   0 , Color4 1 0 0 1)
+         , (Vector3   0    0    5 , Color4 0 0 1 1)
+         , (Vector3   0    0  (-5), Color4 0 0 1 1) ]
 
-rshp :: State -> Size -> IO State
-rshp x size@(Size w h) = do
-  viewport $= (Position 0 0, size)
-  matrixMode $= Projection
-  loadIdentity
-  let wf = fromIntegral w
-  let hf = fromIntegral h
-  if w <= h
-    then ortho (-1.5) 1.5 (-1.5 * hf / wf) (1.5 * hf / wf) (-10) 10
-    else ortho (-1.5 * wf / hf) (1.5 * wf / hf) (-1.5) 1.5 (-10) 10
-  matrixMode $= Modelview 0
-  loadIdentity
-  return x
-
-myBeads = [Bead (0, 0) H, Bead (1,0) P, Bead (1, 1) P]
-
-test [] = yield >> return []
-test s = do
-  threadDelay $ 3 * 1000000
-  return (tail s)
-
+state0 :: State
+state0 = fieldOf beads0 & fieldOf (initCamera (0, 0, 0))
 
 main :: IO ()
 main = do
-  let cbks  = (D.emptyCallbacks myBeads)
-                { D.display = disp
-                , D.reshape = rshp
-                , D.idle    = Just test}
+  let cbks  = [ D.Display focus
+              , D.Display beadRenderer
+              , D.Reshape cameraReshape
+              , D.KeyboardMouse cameraKeyboardMouse
+              , D.Motion cameraMotion]
 
       wopts = D.WindowOptions
                 { D.windowSize = (500, 500)
                 , D.windowPos  = (100, 100)
                 , D.windowName = Nothing }
 
-      opts  = D.Options
-                { D.callbacks = cbks
-                , D.windowOptions = wopts }
-
-  setup opts
-
-
-
-data Residue = H | P
-  deriving (Show, Eq)
-
-data Bead = Bead (Int, Int) Residue
-  deriving (Show, Eq)
-
-displayBead :: Bead -> IO ()
-displayBead (Bead (x, y) r) = do
-  preservingMatrix $ do
-    color clr
-    translate pos
-    renderObject Solid (Sphere' 0.5 40 20)
-    
-  where
-    pos = Vector3 (toGLfloat . fromIntegral $ x) (toGLfloat . fromIntegral $ y) 0 
-    clr = case r of
-            H -> Color4 1 0 0 1 :: Color4 GLfloat
-            P -> Color4 1 1 1 1 :: Color4 GLfloat
-
-
+  setup cbks state0 wopts
 
 
 

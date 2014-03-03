@@ -1,76 +1,29 @@
 
-module Setup where
+module Setup ( setup ) where
 
 
 import Prelude hiding ( init )
 import System.Exit ( exitSuccess )
+import Data.IORef ( newIORef )
 import Graphics.UI.GLUT
+import Data.Time.Clock ( getCurrentTime, diffUTCTime, addUTCTime )
 import Control.Concurrent ( MVar, readMVar, swapMVar, newMVar, takeMVar, putMVar, forkIO, forkOS, threadDelay )
-import Control.Monad ( unless, forever )
+import Control.Monad ( unless, forever, foldM )
 
 import qualified Data as D
 import Util
 
 
-setup :: D.Options s -> IO ()
-setup opts = do
-  let cbks = D.callbacks opts
-  let wopt = D.windowOptions opts
-
+setup :: [D.Callback s] -> s -> D.WindowOptions -> IO ()
+setup cbks state0 wopt = do
   (wName, _) <- getArgsAndInitialize
   _ <- makeWindow wName wopt
-
-  state0 <- D.init cbks
   stateMVar <- newMVar state0
   displayReadyMVar <- newMVar False
-
-  let exitOverride a b c d = case (a,b) of
-        (Char '\27', Down) -> exitSuccess
-        _ -> do
-          let kbm = D.keyboardMouse cbks
-          stateMVar `withMVar` (\s -> kbm s (a, b, c, d))
-          postRedisplay Nothing          
-
-      motionCallback' pos = do
-        let mtn = D.motion cbks
-        stateMVar `withMVar`  (\s -> mtn s $ D.Motion D.Active pos)
-        postRedisplay Nothing
-
-      passiveMotionCallback' pos = do
-        let mtn = D.motion cbks
-        stateMVar `withMVar` (\s -> mtn s $ D.Motion D.Passive pos)
-        postRedisplay Nothing
-
-      displayCallback' = do
-        let dsp = D.display cbks
-        stateMVar `withMVar` dsp
-        displayReadyMVar`swapMVar` True
-        
-        flush
-        swapBuffers
-        postRedisplay Nothing
-        return ()      
-
-      reshapeCallback' size = do
-        let rshp = D.reshape cbks
-        stateMVar `withMVar` (\s -> rshp s size)
-  
-  displayCallback $= displayCallback'
-  reshapeCallback $= Just reshapeCallback'
-  keyboardMouseCallback $= Just exitOverride
-  motionCallback $= Just motionCallback'
-  passiveMotionCallback $= Just passiveMotionCallback'
- 
-  _ <- case D.idle cbks of
-         Nothing  -> return ()
-         (Just f) -> do
-           _ <- forkIO $ idleThread stateMVar displayReadyMVar f
-           return ()
-
+  initialise cbks stateMVar 
+  setupCallbacks cbks stateMVar displayReadyMVar
+  setupIdles cbks stateMVar displayReadyMVar
   mainLoop
-  where
-    withMVar :: MVar s -> (s -> IO s) -> IO ()
-    withMVar m f = takeMVar m >>= f >>= putMVar m
 
 
 makeWindow :: String -> D.WindowOptions -> IO (Window)
@@ -101,21 +54,107 @@ makeWindow wName wopt = do
   colorMaterial           $= Just (Front, Diffuse)
   return wndw
 
-idleThread :: MVar s -> MVar Bool -> (s -> IO s) -> IO ()
-idleThread stateMVar displayReadyMVar idle = do
+
+initialise :: [D.Callback s] -> MVar s -> IO ()
+initialise cbks stateMVar = do
+  let inits = [f | D.Init f <- cbks]
+  unless (null inits) $ do
+    state <- takeMVar stateMVar
+    state' <- foldM (flip ($)) state inits
+    stateMVar `putMVar` state'
+
+
+setupCallbacks :: [D.Callback s] -> MVar s -> MVar Bool -> IO ()
+setupCallbacks cbks stateMVar displayReadyMVar= do
+  let exitOverride a b c d = case (a,b) of
+        (Char '\27', Down) -> exitSuccess
+        _ -> do
+          let kbms = [f | D.KeyboardMouse f <- cbks]
+          unless (null kbms) $ do
+            state  <- takeMVar stateMVar
+            state' <- foldM (\s f -> f s (a,b,c,d)) state kbms
+            stateMVar `putMVar` state'
+  
+      motionCallback' pos = do
+        let mtns = [f | D.Motion f <- cbks]
+        unless (null mtns) $ do
+          let pos' = fromPosition pos
+          state <- takeMVar stateMVar
+          state' <- foldM (\s f -> f s (D.Active, pos')) state mtns
+          stateMVar `putMVar` state'
+
+      passiveMotionCallback' pos = do
+        let mtns = [f | D.Motion f <- cbks]
+        unless (null mtns) $ do
+          let pos' = fromPosition pos
+          state <- takeMVar stateMVar
+          state' <- foldM (\s f -> f s (D.Passive, pos')) state mtns
+          stateMVar `putMVar` state'
+
+      displayCallback' = do
+        let dsps = [f | D.Display f <- cbks]
+        unless (null dsps) $ preservingMatrix $ do 
+          state <- readMVar stateMVar
+          mapM_ ($ state) dsps
+        displayReadyMVar `swapMVar`True
+        flush
+        swapBuffers
+        postRedisplay Nothing
+        return ()
+      
+      reshapeCallback' size = do
+        let rsps = [f | D.Reshape f <- cbks]
+        unless (null rsps) $ do
+          let size' = fromSize size
+          state <- takeMVar stateMVar
+          state' <- foldM (\s f -> f s size') state rsps
+          stateMVar `putMVar` state'
+
+  displayCallback       $= displayCallback'
+  reshapeCallback       $= Just reshapeCallback'
+  keyboardMouseCallback $= Just exitOverride
+  motionCallback        $= Just motionCallback'
+  passiveMotionCallback $= Just passiveMotionCallback'
+
+  
+setupIdles :: [D.Callback s] -> MVar s -> MVar Bool -> IO ()
+setupIdles cbks stateMVar displayReadyMVar = do
+  let idls  = [(f, dt) | D.Idle f dt <- cbks]
+  mapM_ (\(f, dt) -> forkIO $ idleThread stateMVar displayReadyMVar f dt) idls
+
+
+idleThread :: MVar s -> MVar Bool -> (s -> IO s) -> Double -> IO ()
+idleThread stateMVar displayReadyMVar idle dTime = do
   let waitUntilDisplayIsReady :: IO ()
       waitUntilDisplayIsReady = do
         ready <- readMVar displayReadyMVar
         unless ready $ threadDelay 10000 >> waitUntilDisplayIsReady
-
+  
   waitUntilDisplayIsReady
+  
+  t0 <- getCurrentTime
+  lastTimeRef <- newIORef t0
 
   forever $ do
-    nextState <- readMVar stateMVar >>= idle
-    _ <- nextState `seq` swapMVar stateMVar nextState
+    currentTime <- getCurrentTime
+    lastTime <- get lastTimeRef
 
-    postRedisplay Nothing
-  
+    let usRemaining :: Int
+        usRemaining = round $ 1e6 * (dTime - realToFrac (diffUTCTime currentTime lastTime))
+
+
+    if usRemaining <= 0
+      then do
+        lastTimeRef $= addUTCTime (realToFrac dTime) lastTime
+        nextState <- readMVar stateMVar >>= idle
+        _ <- nextState `seq` swapMVar stateMVar nextState
+               
+        postRedisplay Nothing
+      else threadDelay usRemaining
+
+
+
+
 
 
 
