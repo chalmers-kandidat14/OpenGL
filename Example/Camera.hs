@@ -99,5 +99,23 @@ cameraReshape a s@(w, h) = do
   postRedisplay Nothing
   return a
 
+cameraRenderer :: (Has Camera r) => GLdouble -> r -> IO ()
+cameraRenderer d' r = do
+  preservingMatrix $ do
+    let draw i = do
+          color $ clr !! i
+          renderPrimitive Lines $ mapM_ vertex (lines !! i)
+    mapM_ draw [0..2]
+  where
+    cam = Camera ^. r
+    (x,y,z) = pos cam
+    d = (rho cam) / 70 * d'
+
+    clr :: [Color4 GLfloat]
+    clr = [Color4 1 0 0 1, Color4 0 1 0 1, Color4 0 0 1 1]
+    
+    lines = [ [ Vertex3 (x-d) y z, Vertex3 (x+d) y z ]
+            , [ Vertex3 x (y-d) z, Vertex3 x (y+d) z ]
+            , [ Vertex3 x y (z-d), Vertex3 x y (z+d) ] ]
 
 

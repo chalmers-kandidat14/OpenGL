@@ -31,6 +31,7 @@ main = do
   let cbks  = [ D.Display focus
               , D.Display beadRenderer
               , D.Display $ gridRenderer (Color4 0.5 0.5 0.5 1) 20 1
+              , D.Display $ cameraRenderer 0.5
               , D.Reshape cameraReshape
               , D.KeyboardMouse cameraKeyboardMouse
               , D.Motion cameraMotion]
